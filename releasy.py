@@ -1,4 +1,4 @@
-#!/usr/bin/env -S pipx run
+#!/usr/bin/env -S uv run
 # /// script
 # requires-python = ">=3.9"
 # dependencies = [
