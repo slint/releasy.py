@@ -143,6 +143,8 @@ def rewrite_headers(repo: Repo, since_tag: Version, org: str) -> set[str]:
     changed_files = set()
 
     for fname in repo.git.diff("--name-only", f"{since_tag}").splitlines():
+        if not Path(fname).exists():
+            continue
         if _sub_in_file(fname, year_range_regex, year_range_sub):
             changed_files.add(fname)
         if _sub_in_file(fname, year_single_regex, year_range_sub):
