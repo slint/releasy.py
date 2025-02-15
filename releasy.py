@@ -111,7 +111,7 @@ def rewrite_package_version(repo: Repo, new_version: Version) -> set[str]:
     return {version_file}
 
 
-def update_changelog(repo: Repo, old_tag: str, new_tag: Version) -> set[str]:
+def update_changelog(repo: Repo, old_tag: str, new_tag: str) -> set[Path]:
     today = datetime.now()
     try:
         commits = repo.git.log(f"{old_tag}..HEAD", pretty="format:- %s%w(0,0,4)%+b")
@@ -120,7 +120,7 @@ def update_changelog(repo: Repo, old_tag: str, new_tag: Version) -> set[str]:
         click.secho(str(ex), fg="yellow", err=True)
         commits = ""
 
-    changelog = f"Version v{new_tag} (released {today:%Y-%m-%d})\n\n{commits}"
+    changelog = f"Version {new_tag} (released {today:%Y-%m-%d})\n\n{commits}"
 
     # Inject the new changelog right after the header
     changelog_file = Path("CHANGES.rst")
@@ -132,7 +132,7 @@ def update_changelog(repo: Repo, old_tag: str, new_tag: Version) -> set[str]:
     return {changelog_file}
 
 
-def rewrite_headers(repo: Repo, since_tag: Version, org: str) -> set[str]:
+def rewrite_headers(repo: Repo, since_tag: str, org: str) -> set[str]:
     current_year = datetime.now().year
 
     # Given the current year is 2024 and org is "CERN", replace...
@@ -170,7 +170,17 @@ def rewrite_headers(repo: Repo, since_tag: Version, org: str) -> set[str]:
 def main(new_tag, org):
     """Generate a module release."""
     repo = Repo(".")
+
+    # Get the current/old version first from the package...
     old_tag = repo.git.describe("--tags", "--abbrev=0")
+    version_line = repo.git.grep("--no-color", "-h", "-E", "__version__ = ")
+    version_match = re.match(r'__version__ = "(.+)"', version_line)
+    if version_match:
+        old_ver = version_match.group(1)
+        if not old_tag.endswith(old_ver):
+            raise RuntimeError("Version in package does not match tag")
+        old_tag = f"v{old_ver}"
+
     old_ver = Version(old_tag)
 
     if new_tag is None:
@@ -186,7 +196,7 @@ def main(new_tag, org):
     #       tag or the Version Python object, depending on the use-case.
     changed_files |= rewrite_package_version(repo, new_ver)
     changed_files |= rewrite_headers(repo, old_tag, org=org)
-    changed_files |= update_changelog(repo, old_tag, new_ver)
+    changed_files |= update_changelog(repo, old_tag, new_tag)
 
     # Open the changelog for editing
     os.system("$EDITOR CHANGES.rst")
