@@ -38,7 +38,7 @@ def _sub_in_file(file, pattern, replacement) -> bool:
     return new_content != old_content
 
 
-VersionLevels = Literal["major", "minor", "patch", "pre", "dev", "post"]
+VersionLevels = Literal["major", "minor", "patch", "pre", "dev", "post", "stable"]
 
 
 def _bump_ver(ver: Version, level: VersionLevels) -> Version:
@@ -60,10 +60,16 @@ def _bump_ver(ver: Version, level: VersionLevels) -> Version:
 
     if level == "pre" and pre is not None:
         pre = (pre[0], pre[1] + 1)
+        if dev is not None:
+            dev = (dev[0], 0)
+        post = None
     if level == "dev" and dev is not None:
         dev = (dev[0], dev[1] + 1)
     if level == "post" and post is not None:
         post = (post[0], post[1] + 1)
+
+    if level == "stable":
+        dev, pre, post = None, None, None
 
     # Since we're using internal classes/attributes, we need to do a little dance to
     # make sure we generate a valid Version object to return
@@ -80,6 +86,8 @@ def prompt_bump_version(ver: Version) -> Version:
 
     # Determine what bump options we can have
     options = {level: _bump_ver(ver, level) for level in ("major", "minor", "patch")}
+    if any((ver.is_prerelease, ver.is_postrelease, ver.is_devrelease)):
+        options["stable"] = _bump_ver(ver, "stable")
     if ver.is_prerelease:
         options["pre"] = _bump_ver(ver, "pre")
     if ver.is_devrelease:
