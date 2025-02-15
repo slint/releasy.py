@@ -18,7 +18,7 @@ from typing import Literal
 
 import click
 import survey
-from git import Repo
+from git import GitCommandError, Repo
 from packaging.version import Version
 
 
@@ -113,7 +113,13 @@ def rewrite_package_version(repo: Repo, new_version: Version) -> set[str]:
 
 def update_changelog(repo: Repo, old_tag: str, new_tag: Version) -> set[str]:
     today = datetime.now()
-    commits = repo.git.log(f"{old_tag}..HEAD", pretty="format:- %s%w(0,0,4)%+b")
+    try:
+        commits = repo.git.log(f"{old_tag}..HEAD", pretty="format:- %s%w(0,0,4)%+b")
+    except GitCommandError as ex:
+        click.secho("Failed to get commits", fg="yellow", err=True)
+        click.secho(str(ex), fg="yellow", err=True)
+        commits = ""
+
     changelog = f"Version v{new_tag} (released {today:%Y-%m-%d})\n\n{commits}"
 
     # Inject the new changelog right after the header
@@ -142,17 +148,19 @@ def rewrite_headers(repo: Repo, since_tag: Version, org: str) -> set[str]:
 
     changed_files = set()
 
-    for fname in repo.git.diff("--name-only", f"{since_tag}").splitlines():
-        if not Path(fname).exists():
-            continue
-        if _sub_in_file(fname, year_range_regex, year_range_sub):
-            changed_files.add(fname)
-        if _sub_in_file(fname, year_single_regex, year_range_sub):
-            changed_files.add(fname)
+    try:
+        for fname in repo.git.diff("--name-only", f"{since_tag}").splitlines():
+            if not Path(fname).exists():
+                continue
+            if _sub_in_file(fname, year_range_regex, year_range_sub):
+                changed_files.add(fname)
+            if _sub_in_file(fname, year_single_regex, year_range_sub):
+                changed_files.add(fname)
 
-        # TODO: Fix wrong package name in headers. E.g.:
-        # "Invenio-RDM-Records is free software" -> "Invenio is free software"
-
+            # TODO: Fix wrong package name in headers. E.g.:
+            # "Invenio-RDM-Records is free software" -> "Invenio is free software"
+    except GitCommandError:
+        pass
     return changed_files
 
 
