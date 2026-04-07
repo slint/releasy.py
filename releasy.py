@@ -9,6 +9,7 @@
 # ]
 # ///
 
+import json
 import os
 import re
 import subprocess
@@ -105,6 +106,25 @@ def prompt_bump_version(ver: Version) -> Version:
     return options[list(options.keys())[option_idx]]
 
 
+def detect_project_type() -> Literal["python", "js"]:
+    if Path("package.json").exists():
+        return "js"
+    return "python"
+
+
+def read_version_js() -> str:
+    with open("package.json") as f:
+        return json.load(f)["version"]
+
+
+def rewrite_package_version_js(new_version: Version) -> set[str]:
+    run_shell_command(f"npm version {new_version} --no-git-tag-version")
+    changed = {"package.json"}
+    if Path("package-lock.json").exists():
+        changed.add("package-lock.json")
+    return changed
+
+
 def rewrite_package_version(repo: Repo, new_version: Version) -> set[str]:
     matched_files = repo.git.grep(
         "--no-color", "--name-only", "-E", "__version__ = "
@@ -119,7 +139,9 @@ def rewrite_package_version(repo: Repo, new_version: Version) -> set[str]:
     return {version_file}
 
 
-def update_changelog(repo: Repo, old_tag: str, new_tag: str) -> set[Path]:
+def update_changelog(
+    repo: Repo, old_tag: str, new_tag: str, project_type: str = "python"
+) -> set[Path]:
     today = datetime.now()
     try:
         commits = repo.git.log(f"{old_tag}..HEAD", pretty="format:- %s%w(0,0,4)%+b")
@@ -128,15 +150,23 @@ def update_changelog(repo: Repo, old_tag: str, new_tag: str) -> set[Path]:
         click.secho(str(ex), fg="yellow", err=True)
         commits = ""
 
-    changelog = f"Version {new_tag} (released {today:%Y-%m-%d})\n\n{commits}"
-
-    # Inject the new changelog right after the header
-    changelog_file = Path("CHANGES.rst")
-    _sub_in_file(
-        changelog_file,
-        r"(Changes\n=======\n)",
-        rf"\1\n{changelog}\n",
-    )
+    if project_type == "js":
+        ver_str = new_tag.lstrip("v")
+        changelog = f"Version {ver_str} (release {today:%Y-%m-%d})\n\n{commits}"
+        changelog_file = Path("CHANGES.md")
+        _sub_in_file(
+            changelog_file,
+            r"(# Changes\n)",
+            rf"\1\n{changelog}\n",
+        )
+    else:
+        changelog = f"Version {new_tag} (released {today:%Y-%m-%d})\n\n{commits}"
+        changelog_file = Path("CHANGES.rst")
+        _sub_in_file(
+            changelog_file,
+            r"(Changes\n=======\n)",
+            rf"\1\n{changelog}\n",
+        )
     return {changelog_file}
 
 
@@ -178,17 +208,23 @@ def rewrite_headers(repo: Repo, since_tag: str, org: str) -> set[str]:
 def main(new_tag, org):
     """Generate a module release."""
     repo = Repo(".")
+    project_type = detect_project_type()
 
     # Get the current/old version first from the package...
     old_tag = repo.git.describe("--tags", "--abbrev=0")
-    version_line = repo.git.grep("--no-color", "-h", "-E", "__version__ = ")
-    version_match = re.match(r'__version__ = "(.+)"', version_line)
-    if version_match:
-        old_ver = version_match.group(1)
-        if not old_tag.endswith(old_ver):
-            raise RuntimeError("Version in package does not match tag")
-        old_tag = f"v{old_ver}"
 
+    if project_type == "js":
+        old_ver_str = read_version_js()
+    else:
+        version_line = repo.git.grep("--no-color", "-h", "-E", "__version__ = ")
+        version_match = re.match(r'__version__ = "(.+)"', version_line)
+        if not version_match:
+            raise RuntimeError("Could not find __version__ in package")
+        old_ver_str = version_match.group(1)
+
+    if not old_tag.endswith(old_ver_str):
+        raise RuntimeError("Version in package does not match tag")
+    old_tag = f"v{old_ver_str}"
     old_ver = Version(old_tag)
 
     if new_tag is None:
@@ -202,12 +238,18 @@ def main(new_tag, org):
     # TODO: Maybe we can actually "unify" the interface for these functions. It's
     #       very important to make sure we pass and use correctly the "verbatim" git
     #       tag or the Version Python object, depending on the use-case.
-    changed_files |= rewrite_package_version(repo, new_ver)
+    if project_type == "js":
+        changed_files |= rewrite_package_version_js(new_ver)
+        changelog_file = "CHANGES.md"
+    else:
+        changed_files |= rewrite_package_version(repo, new_ver)
+        changelog_file = "CHANGES.rst"
+
     changed_files |= rewrite_headers(repo, old_tag, org=org)
-    changed_files |= update_changelog(repo, old_tag, new_tag)
+    changed_files |= update_changelog(repo, old_tag, new_tag, project_type)
 
     # Open the changelog for editing
-    os.system("$EDITOR CHANGES.rst")
+    os.system(f"$EDITOR {changelog_file}")
 
     repo.index.add(list(changed_files))
     repo.index.commit(f"📦 release: {new_tag}")
