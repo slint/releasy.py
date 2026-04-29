@@ -170,7 +170,7 @@ def update_changelog(
     return {changelog_file}
 
 
-def rewrite_headers(repo: Repo, since_tag: str, org: str) -> set[str]:
+def rewrite_headers(repo: Repo, since_tag: str, org: str, org_email_domain: str) -> set[str]:
     current_year = datetime.now().year
 
     # Given the current year is 2024 and org is "CERN", replace...
@@ -190,6 +190,15 @@ def rewrite_headers(repo: Repo, since_tag: str, org: str) -> set[str]:
         for fname in repo.git.diff("--name-only", f"{since_tag}").splitlines():
             if not Path(fname).exists():
                 continue
+            # Only bump org's copyright if at least one author since the last
+            # release has an email at the org's domain. We use author email
+            # (%ae) rather than committer (%ce) so rebase-merges don't
+            # mis-attribute non-org contributions to the org.
+            authors = repo.git.log(
+                f"{since_tag}..HEAD", "--format=%ae", "--", fname
+            ).splitlines()
+            if not any(a.endswith(f"@{org_email_domain}") for a in authors):
+                continue
             if _sub_in_file(fname, year_range_regex, year_range_sub):
                 changed_files.add(fname)
             if _sub_in_file(fname, year_single_regex, year_range_sub):
@@ -205,7 +214,8 @@ def rewrite_headers(repo: Repo, since_tag: str, org: str) -> set[str]:
 @click.command()
 @click.argument("new_tag", required=False, default=None)
 @click.option("--org", default="CERN")
-def main(new_tag, org):
+@click.option("--org-email-domain", default="cern.ch")
+def main(new_tag, org, org_email_domain):
     """Generate a module release."""
     repo = Repo(".")
     project_type = detect_project_type()
@@ -245,7 +255,7 @@ def main(new_tag, org):
         changed_files |= rewrite_package_version(repo, new_ver)
         changelog_file = "CHANGES.rst"
 
-    changed_files |= rewrite_headers(repo, old_tag, org=org)
+    changed_files |= rewrite_headers(repo, old_tag, org=org, org_email_domain=org_email_domain)
     changed_files |= update_changelog(repo, old_tag, new_tag, project_type)
 
     # Open the changelog for editing
