@@ -1,6 +1,11 @@
 # releasy.py
 
-Easy way to interactively generate a release commit for a Python module.
+Easy way to interactively generate a release commit for a Python or JavaScript
+package.
+
+The project type is detected automatically: a `package.json` means JavaScript
+(version bumped via `npm version`, changelog in `CHANGES.md`), otherwise Python
+(version read from `__version__`, changelog in `CHANGES.rst`).
 
 ## Usage
 
